@@ -2,10 +2,9 @@ import sounddevice as sd
 import numpy as np
 import queue
 
-from config import SAMPLE_RATE
+from config import SAMPLE_RATE, CHANNELS, AUDIO_BLOCK_SIZE
 
-
-BLOCK_SIZE = 512
+from core.console import log
 
 
 audio_queue = queue.Queue(
@@ -51,16 +50,16 @@ def start_microphone():
 
     stream = sd.InputStream(
         samplerate=SAMPLE_RATE,
-        channels=1,
+        channels=CHANNELS,
         dtype="int16",
-        blocksize=BLOCK_SIZE,
+        blocksize=AUDIO_BLOCK_SIZE,
         callback=callback
     )
 
 
     stream.start()
 
-    print("[MIC] Ready")
+    log("MIC", "Ready")
 
 
 
@@ -89,6 +88,7 @@ def clear_buffer():
             break
 
 
-    print(
-        f"[MIC] Cleared {removed} frames"
+    log(
+        "MIC",
+        f"Cleared {removed} frames"
     )

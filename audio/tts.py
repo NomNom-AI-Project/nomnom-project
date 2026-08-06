@@ -1,8 +1,8 @@
 import subprocess
-import tempfile
-import os
 
-from config import VOICE_MODEL
+from config import VOICE_MODEL, PIPER_SAMPLE_RATE
+
+from core.console import log
 
 
 
@@ -14,60 +14,72 @@ def speak(
         return
 
 
-    print(
-        "[TTS]",
-        text
-    )
-
-
-    file = tempfile.NamedTemporaryFile(
-        suffix=".wav",
-        delete=False
-    )
-
-
-    filename = file.name
-
-    file.close()
-
+    log("TTS", text)
 
 
     try:
 
-        subprocess.run(
+        piper = subprocess.Popen(
             [
                 "piper",
                 "--model",
                 VOICE_MODEL,
-                "--output_file",
-                filename
+                "--output-raw"
             ],
-            input=text.encode(
-                "utf-8"
-            ),
-            stdout=subprocess.DEVNULL,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL
         )
 
 
-        subprocess.run(
+        # piper.stdin / piper.stdout are typed Optional[IO[bytes]] by
+        # subprocess's stubs, since they're None unless PIPE was
+        # passed - which we did. Narrow into locals once so every use
+        # below is provably non-None, instead of re-checking each time.
+
+        piper_stdin = piper.stdin
+        piper_stdout = piper.stdout
+
+        assert piper_stdin is not None
+        assert piper_stdout is not None
+
+
+        player = subprocess.Popen(
             [
                 "aplay",
-                filename
+                "-r", str(PIPER_SAMPLE_RATE),
+                "-f", "S16_LE",
+                "-t", "raw",
+                "-"
             ],
+            stdin=piper_stdout,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
 
 
-    finally:
+        # let piper receive SIGPIPE if aplay exits early, instead of
+        # blocking on a full pipe buffer
 
-        try:
+        piper_stdout.close()
 
-            os.remove(
-                filename
-            )
 
-        except:
+        piper_stdin.write(
+            text.encode("utf-8")
+        )
 
-            pass
+        piper_stdin.close()
+
+
+        player.wait()
+
+        piper.wait()
+
+
+    except Exception as error:
+
+        log(
+            "ERROR",
+            "TTS failed:",
+            error
+        )

@@ -1,29 +1,6 @@
-from config import (
-    MAX_MEMORY_MESSAGES,
-    ASSISTANT_NAME,
-    DEVELOPER_NAME,
-    DEVELOPER_ALIAS
-)
+from config import MAX_MEMORY_MESSAGES
 
-
-SYSTEM_MESSAGE = f"""
-Sei {ASSISTANT_NAME},
-un assistente AI personale locale.
-
-Regole:
-
-- Rispondi sempre in italiano.
-- Sii preciso e naturale.
-- Non inventare informazioni.
-- Mantieni risposte adatte alla voce.
-- Usa il contesto della conversazione.
-
-Il tuo sviluppatore è:
-{DEVELOPER_NAME}
-
-Nickname:
-{DEVELOPER_ALIAS}
-"""
+from ai.prompts import SYSTEM_PROMPT
 
 
 class Memory:
@@ -34,7 +11,7 @@ class Memory:
         self.messages = [
             {
                 "role": "system",
-                "content": SYSTEM_MESSAGE
+                "content": SYSTEM_PROMPT
             }
         ]
 

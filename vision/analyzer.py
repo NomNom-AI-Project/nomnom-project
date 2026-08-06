@@ -3,7 +3,7 @@ import cv2
 import ollama
 
 
-from config import VISION_MODEL
+from config import VISION_MODEL, OLLAMA_KEEP_ALIVE
 
 from vision.camera import camera
 
@@ -82,7 +82,8 @@ Non inventare dettagli.
         options={
             "temperature":0.2,
             "num_predict":120
-        }
+        },
+        keep_alive=OLLAMA_KEEP_ALIVE
     )
 
 

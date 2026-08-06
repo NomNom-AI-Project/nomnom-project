@@ -5,10 +5,10 @@ from config import (
     WHISPER_LANGUAGE
 )
 
+from core.console import log
 
-print(
-    "[STT] Loading..."
-)
+
+log("STT", "Loading...")
 
 
 model = WhisperModel(
@@ -18,9 +18,7 @@ model = WhisperModel(
 )
 
 
-print(
-    "[STT] Ready"
-)
+log("STT", "Ready")
 
 
 
@@ -28,7 +26,7 @@ def transcribe(
     audio_file
 ):
 
-    segments, info = model.transcribe(  
+    segments, info = model.transcribe(
         audio_file,
         language=WHISPER_LANGUAGE,
         beam_size=1

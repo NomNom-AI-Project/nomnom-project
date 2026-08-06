@@ -11,6 +11,8 @@ from config import (
     CAMERA_HEIGHT
 )
 
+from core.console import log
+
 
 class Camera:
 
@@ -32,7 +34,7 @@ class Camera:
             return
 
 
-        print("[CAMERA] Starting...")
+        log("CAMERA", "Starting...")
 
 
         capture = cv2.VideoCapture(
@@ -53,8 +55,9 @@ class Camera:
 
         if not capture.isOpened():
 
-            print(
-                "[CAMERA] Failed to open webcam"
+            log(
+                "CAMERA",
+                "Failed to open webcam"
             )
 
             capture.release()
@@ -73,6 +76,9 @@ class Camera:
         )
 
         self.thread.start()
+
+
+        log("CAMERA", "Ready")
 
 
 

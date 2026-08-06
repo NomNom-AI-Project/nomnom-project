@@ -24,7 +24,9 @@ SAMPLE_RATE = 16000
 
 CHANNELS = 1
 
-# Better for wakeword + VAD
+# 1280 samples = 80ms @ 16kHz, the frame size openWakeWord is tuned
+# for. Silero VAD handles this length fine too, so one block size
+# can serve both wakeword detection and VAD.
 AUDIO_BLOCK_SIZE = 1280
 
 
@@ -52,6 +54,10 @@ MAX_SPEECH_DURATION = 10.0
 
 SILENCE_DURATION = 0.8
 
+# Seconds to wait for the user to start talking after the wake word
+# before giving up and going back to idle.
+COMMAND_WAIT_TIMEOUT = 15
+
 
 
 # ==========================
@@ -72,6 +78,11 @@ BRAIN_MODEL = "qwen2.5:3b"
 
 VISION_MODEL = "llava:7b"
 
+# Keep a model loaded in Ollama between turns so a pause (thinking,
+# listening, sitting idle) doesn't force a slow reload on the next
+# request.
+OLLAMA_KEEP_ALIVE = "30m"
+
 
 
 # ==========================
@@ -91,6 +102,19 @@ CAMERA_INDEX = 0
 CAMERA_WIDTH = 640
 
 CAMERA_HEIGHT = 480
+
+
+
+# ==========================
+# Text-to-speech
+# ==========================
+
+# Sample rate Piper streams raw PCM at. Medium-quality voices are
+# typically 22050 Hz - if you swap VOICE_MODEL, check the matching
+# .onnx.json ("sample_rate" field) and update this. A mismatch makes
+# speech sound sped up or slowed down, not garbled, so it's easy to
+# miss.
+PIPER_SAMPLE_RATE = 22050
 
 
 

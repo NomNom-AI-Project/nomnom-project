@@ -9,6 +9,16 @@ import numpy as np
 import soundfile as sf
 
 
+from config import (
+    SAMPLE_RATE,
+    AUDIO_BLOCK_SIZE,
+    SILENCE_DURATION,
+    MIN_SPEECH_DURATION,
+    MAX_SPEECH_DURATION,
+    COMMAND_WAIT_TIMEOUT,
+    ASSISTANT_NAME
+)
+
 from audio.microphone import (
     start_microphone,
     get_audio,
@@ -17,14 +27,14 @@ from audio.microphone import (
 
 from audio.wakeword import detect
 
-from audio.vad import contains_speech
+from audio.vad import contains_speech, reset as reset_vad
 
 from audio.stt import transcribe
 
 from audio.tts import speak
 
 
-from ai.brain import think
+from ai.brain import think, warmup
 
 from ai.intent import needs_vision
 
@@ -37,6 +47,20 @@ from core.state import (
     set_state,
     AssistantState
 )
+
+from core.console import log, banner
+
+
+# Derive frame-based thresholds from the configured durations instead
+# of hardcoding magic numbers tied to one specific block size.
+
+FRAME_SECONDS = AUDIO_BLOCK_SIZE / SAMPLE_RATE
+
+SILENCE_LIMIT_FRAMES = max(1, round(SILENCE_DURATION / FRAME_SECONDS))
+
+MIN_SPEECH_FRAMES = max(1, round(MIN_SPEECH_DURATION / FRAME_SECONDS))
+
+MAX_SPEECH_FRAMES = max(1, round(MAX_SPEECH_DURATION / FRAME_SECONDS))
 
 
 
@@ -65,7 +89,7 @@ def save_audio(chunks):
     sf.write(
         filename,
         audio_float,
-        16000
+        SAMPLE_RATE
     )
 
 
@@ -76,7 +100,7 @@ def save_audio(chunks):
 
 def listen_for_command():
 
-    print("[MIC] Preparing...")
+    log("MIC", "Preparing...")
 
 
     clear_buffer()
@@ -87,39 +111,50 @@ def listen_for_command():
     )
 
 
-    print("[MIC] Listening...")
+    log("MIC", "Listening...")
+
+
+    reset_vad()
 
 
     chunks = []
 
-    speech_started = False
+    speech_frames = 0
 
     silence_frames = 0
 
-
-    timeout = time.time() + 15
-
+    speech_started = False
 
 
-    while time.time() < timeout:
+    wait_deadline = time.time() + COMMAND_WAIT_TIMEOUT
+
+
+
+    while True:
+
+        if (
+            not speech_started
+            and time.time() > wait_deadline
+        ):
+
+            log("MIC", "No speech")
+
+            return None
 
 
         audio = get_audio()
 
 
-
-        if contains_speech(
+        speaking = contains_speech(
             audio
-        ):
+        )
 
-            if not speech_started:
 
-                print(
-                    "[MIC] Speech detected"
-                )
+        if speaking:
 
-                speech_started = True
+            speech_started = True
 
+            speech_frames += 1
 
             silence_frames = 0
 
@@ -130,32 +165,40 @@ def listen_for_command():
 
 
 
-        if speech_started:
+        if not speech_started:
 
-            chunks.append(
-                audio
-            )
+            continue
 
 
+        chunks.append(
+            audio
+        )
 
-        # stop after silence
 
-        if (
-            speech_started
-            and silence_frames > 25
-        ):
+        if len(chunks) >= MAX_SPEECH_FRAMES:
+
+            log("MIC", "Max duration reached")
 
             break
 
 
+        if silence_frames > SILENCE_LIMIT_FRAMES:
 
-    if not speech_started:
+            if speech_frames >= MIN_SPEECH_FRAMES:
 
-        print(
-            "[MIC] No speech"
-        )
+                break
 
-        return None
+
+            # too short to be a real command (cough, click, door) -
+            # reset and keep waiting instead of sending noise to STT
+
+            chunks = []
+
+            speech_started = False
+
+            speech_frames = 0
+
+            silence_frames = 0
 
 
 
@@ -168,14 +211,11 @@ def listen_for_command():
 
 def process_command(text):
 
-
     if needs_vision(
         text
     ):
 
-        print(
-            "[AI] Vision requested"
-        )
+        log("AI", "Vision requested")
 
 
         vision_result = analyze(
@@ -183,25 +223,17 @@ def process_command(text):
         )
 
 
-        prompt = f"""
-User request:
-
-{text}
-
-
-Camera analysis:
-
-{vision_result}
-
-
-Answer using the camera information.
-"""
+        context = (
+            "Informazioni dalla fotocamera:\n"
+            f"{vision_result}\n\n"
+            "Rispondi usando queste informazioni visive."
+        )
 
 
         return think(
-            prompt
+            text,
+            extra_context=context
         )
-
 
 
     return think(
@@ -211,16 +243,9 @@ Answer using the camera information.
 
 
 
-
 def main():
 
-    print(
-        """
-=========================
-        NomNom AI
-=========================
-"""
-    )
+    banner(ASSISTANT_NAME)
 
 
     start_microphone()
@@ -229,9 +254,13 @@ def main():
     camera.start()
 
 
-    print(
-        "[SYSTEM] Ready"
-    )
+    log("SYSTEM", "Warming up models...")
+
+
+    warmup()
+
+
+    log("SYSTEM", "Ready")
 
 
 
@@ -239,15 +268,12 @@ def main():
 
         try:
 
-
             set_state(
                 AssistantState.IDLE
             )
 
 
-            print(
-                "[WAKE] Waiting..."
-            )
+            log("WAKE", "Waiting...")
 
 
             # Wakeword loop
@@ -265,9 +291,7 @@ def main():
 
 
 
-            print(
-                "[WAKE] Activated"
-            )
+            log("WAKE", "Activated")
 
 
             set_state(
@@ -281,15 +305,6 @@ def main():
             speak(
                 "Eccomi, dimmi."
             )
-
-
-            time.sleep(
-                1
-            )
-
-
-            clear_buffer()
-
 
 
             set_state(
@@ -317,10 +332,7 @@ def main():
             )
 
 
-            print(
-                "[USER]",
-                text
-            )
+            log("USER", text)
 
 
 
@@ -333,9 +345,25 @@ def main():
             start = time.time()
 
 
-            answer = process_command(
-                text
-            )
+            try:
+
+                answer = process_command(
+                    text
+                )
+
+
+            except Exception as error:
+
+                log(
+                    "ERROR",
+                    "process_command:",
+                    error
+                )
+
+                answer = (
+                    "Scusa, ho avuto un problema "
+                    "a elaborare la richiesta."
+                )
 
 
             elapsed = (
@@ -346,15 +374,9 @@ def main():
 
 
 
-            print(
-                "[AI]",
-                answer
-            )
+            log("AI", answer)
 
-
-            print(
-                f"[TIME] {elapsed:.2f}s"
-            )
+            log("TIME", f"{elapsed:.2f}s")
 
 
 
@@ -378,9 +400,7 @@ def main():
         except KeyboardInterrupt:
 
 
-            print(
-                "\n[SYSTEM] Stopped"
-            )
+            log("SYSTEM", "Stopped")
 
 
             camera.stop()
@@ -392,10 +412,7 @@ def main():
         except Exception as error:
 
 
-            print(
-                "[ERROR]",
-                error
-            )
+            log("ERROR", error)
 
 
             time.sleep(

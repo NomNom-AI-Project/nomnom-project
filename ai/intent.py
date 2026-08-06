@@ -1,7 +1,6 @@
 import ollama
 
-
-MODEL = "qwen2.5:3b"
+from config import BRAIN_MODEL, OLLAMA_KEEP_ALIVE
 
 
 
@@ -29,7 +28,7 @@ Frase:
 """
 
     result = ollama.chat(
-        model=MODEL,
+        model=BRAIN_MODEL,
         messages=[
             {
                 "role":"user",
@@ -39,7 +38,8 @@ Frase:
         options={
             "temperature":0,
             "num_predict":3
-        }
+        },
+        keep_alive=OLLAMA_KEEP_ALIVE
     )
 
 

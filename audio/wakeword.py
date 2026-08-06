@@ -9,8 +9,10 @@ from config import (
     WAKE_THRESHOLD
 )
 
+from core.console import log
 
-print("[WAKE] Loading...")
+
+log("WAKE", "Loading...")
 
 
 available_models = openwakeword.get_pretrained_model_paths()
@@ -37,8 +39,9 @@ if model_path is None:
 
 
 
-print(
-    "[WAKE] Model:",
+log(
+    "WAKE",
+    "Model:",
     os.path.basename(model_path)
 )
 
@@ -52,7 +55,7 @@ wake_model = Model(
 
 
 
-print("[WAKE] Ready")
+log("WAKE", "Ready")
 
 
 
@@ -113,8 +116,9 @@ def detect(
 
     if best_score >= WAKE_THRESHOLD:
 
-        print(
-            f"[WAKE] Detected {best_name}: {best_score:.2f}"
+        log(
+            "WAKE",
+            f"Detected {best_name}: {best_score:.2f}"
         )
 
 
