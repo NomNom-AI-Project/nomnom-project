@@ -25,9 +25,15 @@ SAMPLE_RATE = 16000
 CHANNELS = 1
 
 # 1280 samples = 80ms @ 16kHz, the frame size openWakeWord is tuned
-# for. Silero VAD handles this length fine too, so one block size
-# can serve both wakeword detection and VAD.
+# for. audio/vad.py re-buffers this into the 512-sample windows Silero
+# requires, so one block size can serve both.
 AUDIO_BLOCK_SIZE = 1280
+
+# Pause after the greeting before we start listening, to let the tail
+# of our own TTS drain out of the mic buffer. Was 0.8s; the buffer is
+# now flushed AFTER this delay rather than before, so a shorter settle
+# is enough and it cuts dead air off every single interaction.
+MIC_SETTLE_DELAY = 0.3
 
 
 # ==========================
@@ -64,6 +70,9 @@ COMMAND_WAIT_TIMEOUT = 15
 # Speech recognition
 # ==========================
 
+# "tiny" is roughly 2x faster than "base" with some accuracy loss;
+# "small" is more accurate but noticeably slower on CPU. If STT is
+# your bottleneck, this is the dial to turn.
 WHISPER_MODEL = "base"
 
 WHISPER_LANGUAGE = "it"
@@ -76,12 +85,35 @@ WHISPER_LANGUAGE = "it"
 
 BRAIN_MODEL = "qwen2.5:3b"
 
+# llava:7b is heavy on CPU and is usually the single slowest step in a
+# camera question. If vision is still too slow, swapping this for a
+# smaller multimodal model is by far the biggest win available -
+# "moondream" (~1.8B) or "llava-phi3" (~3.8B) are drop-in alternatives
+# via `ollama pull`, typically 2-4x faster at some accuracy cost.
 VISION_MODEL = "llava:7b"
 
-# Keep a model loaded in Ollama between turns so a pause (thinking,
-# listening, sitting idle) doesn't force a slow reload on the next
-# request.
+# Keep models loaded in Ollama between turns so a pause doesn't force
+# a slow reload on the next request.
 OLLAMA_KEEP_ALIVE = "30m"
+
+# Context window. Smaller = faster prompt processing. This needs to
+# comfortably fit the system prompt plus MAX_MEMORY_MESSAGES of
+# history; 2048 is plenty for short voice exchanges.
+NUM_CTX = 2048
+
+# Reply length caps. Voice answers should be short anyway, and every
+# extra token is extra time before the user hears the end.
+BRAIN_NUM_PREDICT = 120
+
+VISION_NUM_PREDICT = 80
+
+# Load models at startup (in a background thread, so startup isn't
+# blocked) instead of paying a cold load on first use. Vision warmup
+# costs RAM for a model you may never use in a given session - set to
+# False if memory is tight on your machine.
+WARMUP_BRAIN = True
+
+WARMUP_VISION = True
 
 
 
@@ -102,6 +134,13 @@ CAMERA_INDEX = 0
 CAMERA_WIDTH = 640
 
 CAMERA_HEIGHT = 480
+
+# LLaVA-style models downscale to 336x336 internally anyway, so
+# sending a full 640x480 frame just costs JPEG encode time and a
+# bigger base64 payload for no accuracy gain.
+VISION_IMAGE_MAX_SIZE = 448
+
+VISION_JPEG_QUALITY = 80
 
 
 

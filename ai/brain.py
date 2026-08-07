@@ -1,6 +1,16 @@
+import threading
+
 import ollama
 
-from config import BRAIN_MODEL, OLLAMA_KEEP_ALIVE
+from config import (
+    BRAIN_MODEL,
+    VISION_MODEL,
+    OLLAMA_KEEP_ALIVE,
+    NUM_CTX,
+    BRAIN_NUM_PREDICT,
+    WARMUP_BRAIN,
+    WARMUP_VISION
+)
 
 from core.memory import memory
 
@@ -8,10 +18,15 @@ from core.console import log
 
 
 
-def think(
+def think_stream(
     text,
     extra_context=None
 ):
+
+    # Streams the reply piece by piece as the model generates it, so
+    # the caller can start speaking the first sentence instead of
+    # waiting for the whole answer to finish. This is the single
+    # biggest improvement to *perceived* response time.
 
     memory.add_user(
         text
@@ -35,47 +50,84 @@ def think(
         ]
 
 
-    response = ollama.chat(
+    answer = ""
+
+
+    stream = ollama.chat(
         model=BRAIN_MODEL,
         messages=messages,
         options={
             "temperature":0.3,
-            "num_predict":120
+            "num_predict":BRAIN_NUM_PREDICT,
+            "num_ctx":NUM_CTX
         },
-        keep_alive=OLLAMA_KEEP_ALIVE
+        keep_alive=OLLAMA_KEEP_ALIVE,
+        stream=True
     )
 
 
-    answer = response[
-        "message"
-    ][
-        "content"
-    ].strip()
+    for chunk in stream:
+
+        piece = chunk["message"]["content"]
+
+
+        if piece:
+
+            answer += piece
+
+            yield piece
 
 
 
     memory.add_ai(
-        answer
+        answer.strip()
     )
 
 
-    return answer
+
+def think(
+    text,
+    extra_context=None
+):
+
+    # Non-streaming convenience wrapper, kept for any caller that just
+    # wants the finished string.
+
+    return "".join(
+        think_stream(
+            text,
+            extra_context
+        )
+    ).strip()
 
 
 
-def warmup():
+def remember(
+    user_text,
+    ai_text
+):
 
-    # Force the brain model into memory at startup instead of paying
-    # the cold-start load time on the user's first real question.
+    # Used by the vision path, which answers from the vision model
+    # directly and so never goes through think_stream().
+
+    memory.add_user(user_text)
+
+    memory.add_ai(ai_text)
+
+
+
+def _load(
+    model_name
+):
 
     try:
 
         ollama.chat(
-            model=BRAIN_MODEL,
+            model=model_name,
             messages=[
                 {
                     "role":"user",
-                    "content":"ciao"
+                    "content":"ok"
                 }
             ],
             options={
@@ -84,10 +136,43 @@ def warmup():
             keep_alive=OLLAMA_KEEP_ALIVE
         )
 
+        log("WARMUP", f"{model_name} ready")
+
+
     except Exception as error:
 
         log(
             "WARMUP",
-            "Failed:",
+            f"{model_name} failed:",
             error
         )
+
+
+
+def warmup():
+
+    # Load models in the background so startup isn't blocked. By the
+    # time the user finishes saying their first command, the model is
+    # usually already resident - which removes the cold-load stall
+    # from the first (and, for vision, often the only) request.
+
+    targets = []
+
+
+    if WARMUP_BRAIN:
+
+        targets.append(BRAIN_MODEL)
+
+
+    if WARMUP_VISION:
+
+        targets.append(VISION_MODEL)
+
+
+    for model_name in targets:
+
+        threading.Thread(
+            target=_load,
+            args=(model_name,),
+            daemon=True
+        ).start()

@@ -3,10 +3,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import time
-import tempfile
 
 import numpy as np
-import soundfile as sf
 
 
 from config import (
@@ -16,6 +14,7 @@ from config import (
     MIN_SPEECH_DURATION,
     MAX_SPEECH_DURATION,
     COMMAND_WAIT_TIMEOUT,
+    MIC_SETTLE_DELAY,
     ASSISTANT_NAME
 )
 
@@ -34,13 +33,13 @@ from audio.stt import transcribe
 from audio.tts import speak
 
 
-from ai.brain import think, warmup
+from ai.brain import think_stream, warmup
 
 from ai.intent import needs_vision
 
 from vision.camera import camera
 
-from vision.analyzer import analyze
+from vision.analyzer import analyze_stream
 
 
 from core.state import (
@@ -49,6 +48,8 @@ from core.state import (
 )
 
 from core.console import log, banner
+
+from core.text import stream_sentences, clean_for_speech
 
 
 # Derive frame-based thresholds from the configured durations instead
@@ -64,57 +65,43 @@ MAX_SPEECH_FRAMES = max(1, round(MAX_SPEECH_DURATION / FRAME_SECONDS))
 
 
 
-def save_audio(chunks):
+def build_waveform(chunks):
 
-    filename = tempfile.NamedTemporaryFile(
-        suffix=".wav",
-        delete=False
-    ).name
-
+    # Hand Whisper a float32 waveform directly instead of writing a
+    # temp WAV and reading it back.
 
     audio = np.concatenate(
         chunks
     )
 
 
-    audio_float = (
-        audio.astype(
-            np.float32
-        )
+    return (
+        audio.astype(np.float32)
         /
         32768.0
     )
-
-
-    sf.write(
-        filename,
-        audio_float,
-        SAMPLE_RATE
-    )
-
-
-    return filename
 
 
 
 
 def listen_for_command():
 
-    log("MIC", "Preparing...")
+    # Settle first, THEN flush. The tail of our own greeting is still
+    # arriving from the sound card during this delay, so clearing
+    # afterwards is what actually drops it - which is why the delay
+    # can now be much shorter than before.
+
+    time.sleep(
+        MIC_SETTLE_DELAY
+    )
 
 
     clear_buffer()
 
-
-    time.sleep(
-        0.8
-    )
+    reset_vad()
 
 
     log("MIC", "Listening...")
-
-
-    reset_vad()
 
 
     chunks = []
@@ -202,14 +189,18 @@ def listen_for_command():
 
 
 
-    return save_audio(
+    return build_waveform(
         chunks
     )
 
 
 
 
-def process_command(text):
+def respond(text):
+
+    # Returns a stream of text pieces. Vision questions are answered
+    # by the vision model directly - no second pass through the brain
+    # model, which used to double the wait and force a model swap.
 
     if needs_vision(
         text
@@ -218,27 +209,61 @@ def process_command(text):
         log("AI", "Vision requested")
 
 
-        vision_result = analyze(
+        return analyze_stream(
             text
         )
 
 
-        context = (
-            "Informazioni dalla fotocamera:\n"
-            f"{vision_result}\n\n"
-            "Rispondi usando queste informazioni visive."
-        )
-
-
-        return think(
-            text,
-            extra_context=context
-        )
-
-
-    return think(
+    return think_stream(
         text
     )
+
+
+
+
+def speak_response(pieces):
+
+    # Speaks the first complete sentence as soon as it exists, while
+    # the model is still generating the rest.
+
+    start = time.time()
+
+    first_audio = None
+
+    spoken = []
+
+
+    for sentence in stream_sentences(
+        pieces
+    ):
+
+        clean = clean_for_speech(
+            sentence
+        )
+
+
+        if not clean:
+            continue
+
+
+        if first_audio is None:
+
+            first_audio = time.time() - start
+
+            log(
+                "TIME",
+                f"first audio in {first_audio:.2f}s"
+            )
+
+
+        spoken.append(clean)
+
+
+        speak(clean)
+
+
+
+    return " ".join(spoken)
 
 
 
@@ -254,8 +279,8 @@ def main():
     camera.start()
 
 
-    log("SYSTEM", "Warming up models...")
-
+    # Non-blocking: models load in background threads while the user
+    # is still walking up to say the wake word.
 
     warmup()
 
@@ -312,11 +337,11 @@ def main():
             )
 
 
-            audio_file = listen_for_command()
+            waveform = listen_for_command()
 
 
 
-            if audio_file is None:
+            if waveform is None:
 
                 continue
 
@@ -327,8 +352,17 @@ def main():
             )
 
 
+            heard = time.time()
+
+
             text = transcribe(
-                audio_file
+                waveform
+            )
+
+
+            log(
+                "TIME",
+                f"transcribed in {time.time() - heard:.2f}s"
             )
 
 
@@ -345,10 +379,15 @@ def main():
             start = time.time()
 
 
+            set_state(
+                AssistantState.SPEAKING
+            )
+
+
             try:
 
-                answer = process_command(
-                    text
+                answer = speak_response(
+                    respond(text)
                 )
 
 
@@ -356,37 +395,24 @@ def main():
 
                 log(
                     "ERROR",
-                    "process_command:",
+                    "respond:",
                     error
                 )
 
-                answer = (
+                answer = ""
+
+                speak(
                     "Scusa, ho avuto un problema "
                     "a elaborare la richiesta."
                 )
 
 
-            elapsed = (
-                time.time()
-                -
-                start
-            )
-
-
 
             log("AI", answer)
 
-            log("TIME", f"{elapsed:.2f}s")
-
-
-
-            set_state(
-                AssistantState.SPEAKING
-            )
-
-
-            speak(
-                answer
+            log(
+                "TIME",
+                f"total {time.time() - start:.2f}s"
             )
 
 
