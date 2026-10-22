@@ -5,6 +5,7 @@ import ollama
 
 from config import (
     VISION_MODEL,
+    CLOUD_VISION_MODEL,
     OLLAMA_KEEP_ALIVE,
     NUM_CTX,
     VISION_NUM_PREDICT,
@@ -16,6 +17,8 @@ from config import (
 from vision.camera import camera
 
 from ai.brain import remember
+
+from ai import cloud
 
 
 
@@ -94,6 +97,75 @@ def encode_image(frame):
 
 
 
+def _cloud_stream(
+    question,
+    image
+):
+
+    # OpenAI-style image message: the frame travels as a data URI.
+
+    return cloud.stream_chat(
+        CLOUD_VISION_MODEL,
+        [
+            {
+                "role":"user",
+                "content":[
+                    {
+                        "type":"text",
+                        "text":f"{PROMPT}{question}"
+                    },
+                    {
+                        "type":"image_url",
+                        "image_url":{
+                            "url":f"data:image/jpeg;base64,{image}"
+                        }
+                    }
+                ]
+            }
+        ],
+        VISION_NUM_PREDICT,
+        0.2
+    )
+
+
+
+def _local_stream(
+    question,
+    image
+):
+
+    stream = ollama.chat(
+        model=VISION_MODEL,
+        messages=[
+            {
+                "role":"user",
+                "content":f"{PROMPT}{question}",
+                "images":[
+                    image
+                ]
+            }
+        ],
+        options={
+            "temperature":0.2,
+            "num_predict":VISION_NUM_PREDICT,
+            "num_ctx":NUM_CTX
+        },
+        keep_alive=OLLAMA_KEEP_ALIVE,
+        stream=True
+    )
+
+
+    for chunk in stream:
+
+        piece = chunk["message"]["content"]
+
+
+        if piece:
+
+            yield piece
+
+
+
 def analyze_stream(
     question
 ):
@@ -128,37 +200,17 @@ def analyze_stream(
     answer = ""
 
 
-    stream = ollama.chat(
-        model=VISION_MODEL,
-        messages=[
-            {
-                "role":"user",
-                "content":f"{PROMPT}{question}",
-                "images":[
-                    image
-                ]
-            }
-        ],
-        options={
-            "temperature":0.2,
-            "num_predict":VISION_NUM_PREDICT,
-            "num_ctx":NUM_CTX
-        },
-        keep_alive=OLLAMA_KEEP_ALIVE,
-        stream=True
+    pieces = cloud.with_fallback(
+        lambda: _cloud_stream(question, image),
+        lambda: _local_stream(question, image)
     )
 
 
-    for chunk in stream:
+    for piece in pieces:
 
-        piece = chunk["message"]["content"]
+        answer += piece
 
-
-        if piece:
-
-            answer += piece
-
-            yield piece
+        yield piece
 
 
 
