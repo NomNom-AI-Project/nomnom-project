@@ -21,19 +21,23 @@ microphone ──► wake word ──► VAD ──► Whisper ──► intent
                                         │                              │
                                         └───────────────┬──────────────┘
                                                         │
-                                                     Piper TTS ──► speakers
+                                              Piper TTS (loaded once) ──► speakers
 ```
 
-The assistant idles until it hears the wake word, plays a short greeting, records until you stop talking, then answers out loud. Answers begin playing on the first complete sentence, while the rest is still being generated.
+The assistant idles until it hears the wake word, beeps, records until you stop talking, then answers out loud. Each sentence starts playing as soon as it's complete, while the rest is still being generated; the next sentence is synthesised while the current one plays.
 
 ---
 
 ## Requirements
 
-**System packages** (Linux):
+**System packages** (Linux) — PortAudio is used for both the microphone and the speakers:
 
 ```bash
-sudo apt install python3 python3-pip alsa-utils   # alsa-utils provides `aplay`
+# Fedora
+sudo dnf install python3 python3-pip portaudio
+
+# Ubuntu / Debian
+sudo apt install python3 python3-pip libportaudio2
 ```
 
 **Ollama** install from [ollama.com](https://ollama.com), then pull the models:
@@ -43,7 +47,7 @@ ollama pull qwen2.5:3b
 ollama pull llava:7b
 ```
 
-**Piper** — the TTS engine, plus an Italian voice. The project expects the voice at:
+**Piper** — the TTS engine (`piper-tts` 1.3 or newer, installed from `req.txt` and used as a Python library), plus an Italian voice. The project expects the voice at:
 
 ```
 voices/it_IT-paola-medium.onnx
@@ -69,7 +73,7 @@ From the project root:
 python3 main.py
 ```
 
-Wait for `[SYSTEM] Ready`, then say **"Hey Jarvis"**. The assistant replies *"Eccomi, dimmi."* then ask your question.
+Wait for `[SYSTEM] Ready`, then say **"Hey Jarvis"**. After the beep, ask your question.
 
 Stop it with `Ctrl+C`.
 
@@ -106,6 +110,9 @@ Everything is in `config.py`. The values worth knowing:
 | Setting | Default | Notes |
 |---|---|---|
 | `WHISPER_MODEL` | `"base"` | `"tiny"` is ~2x faster, less accurate. `"small"` is slower, more accurate. |
+| `WHISPER_DEVICE` | `"auto"` | Uses an NVIDIA GPU (CUDA) when available, otherwise the CPU. |
+| `WHISPER_COMPUTE_TYPE` | `"int8"` | Best on CPU; `"float16"` is usually best on a GPU. |
+| `WHISPER_CPU_THREADS` | all cores | CPU threads for transcription. |
 | `BRAIN_MODEL` | `"qwen2.5:3b"` | The conversational model. |
 | `VISION_MODEL` | `"llava:7b"` | **Usually the slowest step.** `moondream` (~1.8B) or `llava-phi3` (~3.8B) are 2-4x faster. |
 | `NUM_CTX` | `2048` | Context window. Smaller = faster prompt processing. |
@@ -121,11 +128,12 @@ Everything is in `config.py`. The values worth knowing:
 | `WAKEWORD_MODEL` | `"hey_jarvis"` | Substring matched against openWakeWord's bundled models. |
 | `WAKE_THRESHOLD` | `0.5` | Lower = triggers more easily (and more false positives). |
 | `VAD_THRESHOLD` | `0.25` | Lower = more sensitive to quiet speech. |
-| `SILENCE_DURATION` | `0.8` | Seconds of silence before your command is considered finished. |
+| `SILENCE_DURATION` | `0.5` | Seconds of silence before your command is considered finished. |
 | `MIN_SPEECH_DURATION` | `0.3` | Bursts shorter than this are discarded as noise (coughs, door slams). |
 | `MAX_SPEECH_DURATION` | `10.0` | Hard cap on a single command. |
 | `COMMAND_WAIT_TIMEOUT` | `15` | How long to wait for you to start talking before giving up. |
-| `MIC_SETTLE_DELAY` | `0.3` | Pause after the greeting so its own audio tail isn't recorded. |
+| `MIC_SETTLE_DELAY` | `0.2` | Pause after the beep so its echo isn't recorded. |
+| `BEEP_FREQUENCY` / `BEEP_DURATION` | `880` / `0.12` | The wake beep. |
 
 ### Identity
 
@@ -150,7 +158,7 @@ audio/
   wakeword.py           openWakeWord detection
   vad.py                Silero voice activity detection
   stt.py                faster-whisper transcription
-  tts.py                Piper → aplay
+  tts.py                Piper (loaded once) → sound device, background pipeline
 
 vision/
   camera.py             background webcam capture thread
@@ -177,10 +185,13 @@ Run from the project root the folder directly containing `main.py`. If your edit
 Check `[MIC] Listening...` appears. If it does and nothing follows, lower `VAD_THRESHOLD`. Also confirm your mic is the system default `microphone.py` uses the default input device.
 
 **Speech sounds sped up or slowed down**
-`PIPER_SAMPLE_RATE` doesn't match your voice model. Open the `.onnx.json` next to your `.onnx` voice, find `sample_rate`, and set it to match.
+The sample rate is read from the voice's `.onnx.json`, so make sure the `.onnx` and its `.onnx.json` are the matching pair.
 
 **No sound at all**
-Verify `aplay` works standalone: `aplay /usr/share/sounds/alsa/Front_Center.wav`. Then verify Piper: `echo "ciao" | piper --model voices/it_IT-paola-medium.onnx --output_file test.wav`.
+Check `python3 -c "import sounddevice as sd; print(sd.query_devices())"` lists your output device and that it's the system default. Then verify Piper on its own: `echo "ciao" | piper --model voices/it_IT-paola-medium.onnx --output_file test.wav`.
+
+**`OSError: PortAudio library not found`**
+Install PortAudio: `sudo dnf install portaudio` (Fedora) or `sudo apt install libportaudio2` (Ubuntu/Debian).
 
 **Wake word model not found**
 The startup error lists every model openWakeWord has available. `WAKEWORD_MODEL` is matched as a substring against those paths pick a name from the list.
@@ -199,11 +210,12 @@ Each turn logs a timing breakdown:
 
 ```
 [TIME] transcribed in 0.84s
-[TIME] first audio in 1.12s
+[TIME] first audio in 0.62s
+[TIME] command end -> first audio 1.46s
 [TIME] total 4.30s
 ```
 
-`first audio` is what actually matters for how responsive it feels replies start playing on the first sentence rather than after the full answer is generated. If `total` is high but `first audio` is low, it's just a long reply; lower `BRAIN_NUM_PREDICT`. If `first audio` itself is high, the model is the bottleneck use a smaller one.
+`first audio` is measured when sound actually reaches the speaker (so it includes synthesis), counted from the end of transcription. `command end -> first audio` is the full wait after your command was captured, and is the number that matters for how responsive it feels. If `transcribed` dominates, use a smaller `WHISPER_MODEL` or a GPU. If `first audio` dominates, the LLM is the bottleneck: use a smaller model. If only `total` is high, it's just a long reply; lower `BRAIN_NUM_PREDICT`.
 
 ---
 

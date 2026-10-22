@@ -1,11 +1,14 @@
 import re
 
 
-# Sentence-ish boundary: punctuation plus any trailing quotes/brackets,
-# or a hard line break. Good enough for speech segmentation - we only
-# need a natural place to break audio, not linguistic precision.
+# Sentence boundary: end punctuation plus any closing quotes/brackets,
+# FOLLOWED BY WHITESPACE - or a hard line break. Requiring the
+# whitespace is what keeps "3.5" or "1.000" from being split into
+# "3." + "5": while streaming we can't know if a "." at the very end
+# of the buffer is a full stop or a decimal point, so we wait for the
+# next character. The final sentence is flushed when the stream ends.
 _SENTENCE_END = re.compile(
-    r"[.!?…]+[\s\"')\]]*|\n+"
+    r"[.!?…]+[\"'”»)\]]*\s+|\n+"
 )
 
 
@@ -26,11 +29,18 @@ def clean_for_speech(
         text
     )
 
-    # collapse whitespace left behind by the substitutions
+    # collapse whitespace left behind by the substitutions, and drop
+    # the stray space before punctuation ("**Ciao**!" -> "Ciao!")
 
-    return re.sub(
+    text = re.sub(
         r"\s+",
         " ",
+        text
+    )
+
+    return re.sub(
+        r"\s+([.,!?;:…])",
+        r"\1",
         text
     ).strip()
 
@@ -38,21 +48,20 @@ def clean_for_speech(
 
 def stream_sentences(
     pieces,
-    min_first_chars=15
+    min_chars=15
 ):
 
-    # Yields the FIRST complete sentence as soon as it's available, so
-    # speech can start while the model is still generating. Everything
-    # after that is accumulated and yielded as one final chunk.
+    # Yields each complete sentence as soon as it's available, so
+    # speech can start while the model is still generating.
     #
-    # Why not yield every sentence separately? Each speak() call spawns
-    # a fresh piper process, and that spawn gap between every sentence
-    # sounds choppy. One early chunk plus one continuous remainder
-    # gives fast first-audio without breaking up the body.
+    # This used to yield only the first sentence early and then one big
+    # remainder, because every speak() call spawned a new piper process
+    # and the gaps sounded choppy. TTS now keeps the voice loaded and
+    # synthesises the next sentence while the current one plays, so
+    # per-sentence streaming is gap-free and the body of long answers
+    # starts sooner too.
 
     buffer = ""
-
-    first_done = False
 
 
     for piece in pieces:
@@ -60,31 +69,31 @@ def stream_sentences(
         buffer += piece
 
 
-        if first_done:
-            continue
+        while True:
+
+            cut = None
+
+            for match in _SENTENCE_END.finditer(buffer):
+
+                # Merge boundaries that are too short to stand alone
+                # ("Sì." / "Ok.") into the next sentence - speaking
+                # those alone then pausing sounds worse.
+
+                if len(buffer[:match.end()].strip()) >= min_chars:
+
+                    cut = match.end()
+
+                    break
 
 
-        for match in _SENTENCE_END.finditer(buffer):
+            if cut is None:
 
-            head = buffer[:match.end()].strip()
-
-
-            # Skip boundaries that are too short to be a real sentence
-            # ("Sì." / "Ok.") - speaking those alone then pausing
-            # sounds worse than waiting for a bit more text.
-
-            if len(head) < min_first_chars:
-                continue
+                break
 
 
-            buffer = buffer[match.end():]
+            yield buffer[:cut].strip()
 
-            first_done = True
-
-
-            yield head
-
-            break
+            buffer = buffer[cut:]
 
 
 

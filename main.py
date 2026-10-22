@@ -30,7 +30,14 @@ from audio.vad import contains_speech, reset as reset_vad
 
 from audio.stt import transcribe
 
-from audio.tts import speak
+from audio.tts import (
+    speak,
+    say,
+    beep,
+    wait as wait_for_speech,
+    reset_timer as reset_audio_timer,
+    first_play_time
+)
 
 
 from ai.brain import think_stream, warmup
@@ -223,12 +230,13 @@ def respond(text):
 
 def speak_response(pieces):
 
-    # Speaks the first complete sentence as soon as it exists, while
-    # the model is still generating the rest.
+    # Each sentence is queued for speech the moment it's complete.
+    # say() doesn't block, so the LLM keeps streaming while earlier
+    # sentences are synthesised and played in the background.
 
     start = time.time()
 
-    first_audio = None
+    reset_audio_timer()
 
     spoken = []
 
@@ -246,21 +254,27 @@ def speak_response(pieces):
             continue
 
 
-        if first_audio is None:
-
-            first_audio = time.time() - start
-
-            log(
-                "TIME",
-                f"first audio in {first_audio:.2f}s"
-            )
-
-
         spoken.append(clean)
 
 
-        speak(clean)
+        say(clean)
 
+
+
+    wait_for_speech()
+
+
+    # Measured when sound actually reached the speaker, not when the
+    # text was ready - so it includes synthesis time too.
+
+    played = first_play_time()
+
+    if played is not None:
+
+        log(
+            "TIME",
+            f"first audio in {played - start:.2f}s"
+        )
 
 
     return " ".join(spoken)
@@ -324,12 +338,13 @@ def main():
             )
 
 
-            clear_buffer()
+            # Instant pre-rendered beep instead of a spoken greeting.
+            # listen_for_command() flushes the mic after it, so the
+            # beep itself never reaches the VAD.
 
+            beep()
 
-            speak(
-                "Eccomi, dimmi."
-            )
+            wait_for_speech()
 
 
             set_state(
@@ -409,6 +424,19 @@ def main():
 
 
             log("AI", answer)
+
+
+            # The number that matters: from the moment your command was
+            # captured to the moment it started answering.
+
+            played = first_play_time()
+
+            if played is not None:
+
+                log(
+                    "TIME",
+                    f"command end -> first audio {played - heard:.2f}s"
+                )
 
             log(
                 "TIME",

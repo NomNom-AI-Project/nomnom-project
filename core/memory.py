@@ -52,11 +52,22 @@ class Memory:
 
         if len(self.messages) > MAX_MEMORY_MESSAGES:
 
-            self.messages = [
-                self.messages[0]
-            ] + self.messages[
+            recent = self.messages[
                 -MAX_MEMORY_MESSAGES:
             ]
+
+
+            # Never let history start with an orphaned assistant reply
+            # whose question was trimmed away.
+
+            while recent and recent[0]["role"] != "user":
+
+                recent = recent[1:]
+
+
+            self.messages = [
+                self.messages[0]
+            ] + recent
 
 
 

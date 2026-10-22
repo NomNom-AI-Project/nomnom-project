@@ -12,29 +12,41 @@ import re
 # to the list below - it's meant to be edited.
 
 VISION_WORDS = [
-    # seeing / looking
-    "vedi", "vedere", "vedo", "visto", "vista",
-    "guarda", "guardare", "guardi", "osserva", "osservare",
+    # Single words here must be unambiguous on their own. Common words
+    # like "guarda", "intorno", "davanti" or "foto" used to be listed
+    # alone, and sent everyday questions ("guarda, che tempo fa
+    # intorno a Roma?") to the slow vision model. Those now only count
+    # inside a phrase that really refers to what the camera sees.
 
     # the camera itself
-    "telecamera", "webcam", "fotocamera", "videocamera",
+    "telecamera", "webcam", "fotocamera", "videocamera", "inquadratura",
 
-    # images
-    "immagine", "immagini", "foto", "fotografia", "inquadratura",
+    # seeing
+    "cosa vedi", "che vedi", "chi vedi", "che cosa vedi",
+    "mi vedi", "lo vedi", "la vedi", "li vedi", "le vedi",
+    "riesci a vedere", "puoi vedere", "vedi questo", "vedi questa",
+    "guarda qui", "guarda questo", "guarda questa", "guardami",
+    "dai un'occhiata", "dai un occhiata",
 
-    # description requests
-    "descrivi", "descrivere", "descrizione",
-    "riconosci", "riconoscere", "identifica",
+    # describing / recognising what's in view
+    "descrivi cosa", "descrivimi cosa", "descrivi la scena",
+    "descrivi quello che", "descrivimi quello che",
+    "riconosci questo", "riconosci questa", "riconosci chi",
+    "riconoscimi",
 
-    # spatial / worn / colour - typical camera questions
-    "davanti", "di fronte", "intorno", "dietro di me",
-    "indosso", "indossando", "sto tenendo", "in mano",
-    "che colore", "di che colore",
+    # position relative to the camera
+    "davanti a te", "di fronte a te", "intorno a te", "dietro di me",
+    "cosa c'è qui", "chi c'è qui", "cosa c'è davanti", "chi c'è davanti",
 
-    # common phrasings
-    "cosa c'è", "che cosa c'è", "chi c'è",
-    "cosa sto", "che cosa sto",
-    "quante dita", "questo oggetto", "quest'oggetto",
+    # what the user is holding / wearing / doing
+    "in mano", "sto tenendo", "sto indossando", "ho addosso",
+    "come sono vestito", "come sono vestita", "cosa sto facendo",
+    "come mi vedi", "come ti sembro",
+
+    # objects and colours in view
+    "questo oggetto", "quest'oggetto", "quante dita",
+    "di che colore è questo", "di che colore è questa",
+    "che colore ha questo", "che colore ha questa",
 ]
 
 
@@ -57,6 +69,12 @@ def needs_vision(
 
     if not text:
         return False
+
+
+    # Whisper sometimes outputs typographic apostrophes (’), which
+    # would never match the plain ' in phrases like "cosa c'è".
+
+    text = text.replace("\u2019", "'")
 
 
     return _PATTERN.search(text) is not None
