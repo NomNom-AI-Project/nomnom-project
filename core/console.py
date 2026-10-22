@@ -45,6 +45,7 @@ TAG_COLOR = {
     "ERROR": Color.RED,
     "CAMERA": Color.MAGENTA,
     "WARMUP": Color.GRAY,
+    "CLOUD": Color.YELLOW,
 }
 
 

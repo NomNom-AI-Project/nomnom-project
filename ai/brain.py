@@ -3,6 +3,7 @@ import threading
 import ollama
 
 from config import (
+    CLOUD_MODEL,
     BRAIN_MODEL,
     VISION_MODEL,
     OLLAMA_KEEP_ALIVE,
@@ -13,6 +14,8 @@ from config import (
 )
 
 from core.memory import memory
+
+from ai import cloud
 
 from core.console import log
 
@@ -51,6 +54,41 @@ def think_stream(
     answer = ""
 
 
+    pieces = cloud.with_fallback(
+        lambda: cloud.stream_chat(
+            CLOUD_MODEL,
+            messages,
+            BRAIN_NUM_PREDICT,
+            0.3
+        ),
+        lambda: _local_stream(
+            messages
+        )
+    )
+
+
+    for piece in pieces:
+
+        answer += piece
+
+        yield piece
+
+
+
+    # Only the clean user text is stored, so history doesn't fill up
+    # with camera-analysis scaffolding.
+
+    remember(
+        text,
+        answer.strip()
+    )
+
+
+
+def _local_stream(
+    messages
+):
+
     stream = ollama.chat(
         model=BRAIN_MODEL,
         messages=messages,
@@ -71,19 +109,7 @@ def think_stream(
 
         if piece:
 
-            answer += piece
-
             yield piece
-
-
-
-    # Only the clean user text is stored, so history doesn't fill up
-    # with camera-analysis scaffolding.
-
-    remember(
-        text,
-        answer.strip()
-    )
 
 
 
@@ -158,6 +184,9 @@ def warmup():
     # usually already resident - which removes the cold-load stall
     # from the first (and, for vision, often the only) request.
 
+    cloud.warmup()
+
+
     targets = []
 
 
@@ -166,7 +195,10 @@ def warmup():
         targets.append(BRAIN_MODEL)
 
 
-    if WARMUP_VISION:
+    # In cloud mode the local vision model is only a rarely used
+    # fallback - not worth keeping several GB of RAM resident for.
+
+    if WARMUP_VISION and not cloud.enabled():
 
         targets.append(VISION_MODEL)
 

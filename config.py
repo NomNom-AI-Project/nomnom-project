@@ -93,8 +93,57 @@ WHISPER_LANGUAGE = "it"
 
 
 # ==========================
-# AI models
+# Backend
 # ==========================
+
+# "cloud": answer with a hosted model, and fall back to the local
+#          Ollama models automatically if it fails or you're offline.
+# "local": Ollama only - nothing leaves the machine.
+#
+# Cloud mode also falls back to local when no API key is set, so it's
+# safe as the default.
+BACKEND = "cloud"
+
+# Any OpenAI-compatible API works (Groq, OpenRouter, Together, OpenAI,
+# a vLLM server on your LAN...). Defaults are for Groq.
+CLOUD_BASE_URL = "https://api.groq.com/openai/v1"
+
+# Name of the environment variable holding the API key. Put it in a
+# .env file next to main.py (already gitignored) - see .env.example.
+CLOUD_API_KEY_ENV = "NOMNOM_API_KEY"
+
+# One model for both chat and camera questions: it accepts images and
+# can have its reasoning switched off, so it starts answering at once.
+# Groq retires models often - if requests start failing with a
+# "model decommissioned" error, check console.groq.com/docs/deprecations
+CLOUD_MODEL = "qwen/qwen3.8-27b"
+
+CLOUD_VISION_MODEL = "qwen/qwen3.8-27b"
+
+# Extra request fields, provider-specific. "reasoning_effort": "none"
+# stops the model "thinking" before it answers - essential for voice,
+# where those hidden tokens are pure waiting. Remove it for providers
+# or models that don't support it.
+CLOUD_EXTRA_PARAMS = {
+    "reasoning_effort": "none"
+}
+
+# Seconds to wait for the connection or the next piece of the reply
+# before giving up and answering locally instead.
+CLOUD_TIMEOUT = 5
+
+# After a cloud failure, use local models for this many seconds before
+# trying the cloud again, so being offline doesn't cost a timeout on
+# every turn.
+CLOUD_RETRY_AFTER = 60
+
+
+
+# ==========================
+# Local models (Ollama)
+# ==========================
+
+# In cloud mode these are the fallback.
 
 BRAIN_MODEL = "qwen2.5:3b"
 
@@ -124,6 +173,9 @@ VISION_NUM_PREDICT = 80
 # blocked) instead of paying a cold load on first use. Vision warmup
 # costs RAM for a model you may never use in a given session - set to
 # False if memory is tight on your machine.
+#
+# In cloud mode only the local brain is warmed up (so the fallback is
+# instant); the local vision model is skipped to save RAM.
 WARMUP_BRAIN = True
 
 WARMUP_VISION = True

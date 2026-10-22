@@ -1,6 +1,8 @@
 # NomNom
 
-A fully local, offline voice assistant in Italian. Wake word → speech recognition → LLM → spoken reply, with optional webcam vision. Nothing leaves the machine.
+A voice assistant in Italian. Wake word → speech recognition → LLM → spoken reply, with optional webcam vision.
+
+By default the answers come from a hosted model (fast and much smarter), with the local Ollama models as an automatic fallback when the cloud fails or you're offline. Wake word, voice detection, speech recognition and speech synthesis always run locally. Set `BACKEND = "local"` and nothing leaves the machine at all.
 
 Built by **Niccolò Bardi** (Badoverse).
 
@@ -16,8 +18,8 @@ microphone ──► wake word ──► VAD ──► Whisper ──► intent
                                         │                              │
                                    normal question              camera question
                                         │                              │
-                                   qwen2.5:3b                      llava:7b
-                                    (Ollama)                     (Ollama + frame)
+                              cloud model                    cloud model + frame
+                         (fallback: qwen2.5:3b)        (fallback: llava:7b)
                                         │                              │
                                         └───────────────┬──────────────┘
                                                         │
@@ -63,6 +65,15 @@ pip install -r req.txt
 
 On newer Ubuntu/Debian you may need `pip install -r req.txt --break-system-packages`, or use a virtualenv.
 
+**Cloud API key** (optional, but it's the default backend) — get a key from your provider (Groq by default: [console.groq.com/keys](https://console.groq.com/keys)), then:
+
+```bash
+cp .env.example .env
+# edit .env and set NOMNOM_API_KEY=...
+```
+
+`.env` is gitignored. Without a key, NomNom simply runs on the local models.
+
 ---
 
 ## Running
@@ -104,6 +115,20 @@ Routing is keyword-based, defined in `VISION_WORDS` at the top of `ai/intent.py`
 ## Configuration
 
 Everything is in `config.py`. The values worth knowing:
+
+### Backend
+
+| Setting | Default | Notes |
+|---|---|---|
+| `BACKEND` | `"cloud"` | `"cloud"` = hosted model with local fallback. `"local"` = Ollama only, fully offline. |
+| `CLOUD_BASE_URL` | Groq | Any OpenAI-compatible API (OpenRouter, Together, OpenAI, vLLM on your LAN...). |
+| `CLOUD_API_KEY_ENV` | `"NOMNOM_API_KEY"` | Environment variable (or `.env` entry) holding the key. |
+| `CLOUD_MODEL` / `CLOUD_VISION_MODEL` | `"qwen/qwen3.8-27b"` | Handles both text and images. |
+| `CLOUD_EXTRA_PARAMS` | `{"reasoning_effort": "none"}` | Turns off the model's hidden "thinking" so it answers immediately. Remove for providers that don't support it. |
+| `CLOUD_TIMEOUT` | `5` | Seconds before giving up on the cloud and answering locally. |
+| `CLOUD_RETRY_AFTER` | `60` | After a cloud failure, use local models for this long before retrying. |
+
+**How the fallback works:** if the cloud fails *before* saying anything (offline, bad key, retired model, timeout), the same question goes to the local model, so you always get an answer. If it fails midway through a reply, the part already spoken is kept rather than starting over locally. The `[CLOUD]` log lines show when and why it fell back.
 
 ### Speed
 
@@ -150,6 +175,7 @@ req.txt                 Python dependencies
 
 ai/
   brain.py              LLM calls (streaming), memory wiring, model warmup
+  cloud.py              OpenAI-compatible streaming client + local fallback
   intent.py             routes camera questions vs normal questions
   prompts.py            system prompt (single source of truth)
 
@@ -199,6 +225,9 @@ The startup error lists every model openWakeWord has available. `WAKEWORD_MODEL`
 **Camera answers are slow**
 Expected with `llava:7b` on CPU. Check the `[TIME]` lines to confirm that's the slow stage, then switch `VISION_MODEL` to a smaller model.
 
+**It always answers with the local model**
+Look at the `[CLOUD]` lines at startup and when it falls back. `no API key` means `.env` is missing or the variable name doesn't match `CLOUD_API_KEY_ENV`. `HTTP 401` is a wrong key. `HTTP 400`/`404` mentioning the model usually means the provider retired it; pick a current one for `CLOUD_MODEL` (for Groq: [console.groq.com/docs/deprecations](https://console.groq.com/docs/deprecations)).
+
 **Ollama connection errors**
 Make sure the server is running: `ollama serve`. Confirm the models are pulled: `ollama list`.
 
@@ -221,6 +250,6 @@ Each turn logs a timing breakdown:
 
 ## Notes
 
-- Everything runs locally. No API keys, no network calls, no telemetry.
+- In `"cloud"` mode, your transcribed questions and the recent conversation history (text, not audio) and, for camera questions, a single webcam frame are sent to the cloud provider. Everything else stays local. In `"local"` mode nothing leaves the machine.
 - Conversation memory keeps the last `MAX_MEMORY_MESSAGES` exchanges; it resets when you restart.
 - Camera questions are answered by the vision model directly rather than passed through the conversational model afterwards. That's a deliberate speed trade-off: roughly a third of the latency, at the cost of some persona consistency in camera replies.
