@@ -30,10 +30,9 @@ CHANNELS = 1
 AUDIO_BLOCK_SIZE = 1280
 
 # Pause after the greeting before we start listening, to let the tail
-# of our own TTS drain out of the mic buffer. Was 0.8s; the buffer is
-# now flushed AFTER this delay rather than before, so a shorter settle
-# is enough and it cuts dead air off every single interaction.
-MIC_SETTLE_DELAY = 0.3
+# of the wake beep drain out of the mic buffer. The buffer is flushed
+# AFTER this delay, so it only has to cover the beep's echo.
+MIC_SETTLE_DELAY = 0.2
 
 
 # ==========================
@@ -58,7 +57,10 @@ MIN_SPEECH_DURATION = 0.3
 
 MAX_SPEECH_DURATION = 10.0
 
-SILENCE_DURATION = 0.8
+# How long you have to be quiet before the command counts as finished.
+# This is pure dead time on every turn. 0.5s is comfortable for short
+# commands; raise it if it cuts you off mid-sentence.
+SILENCE_DURATION = 0.5
 
 # Seconds to wait for the user to start talking after the wake word
 # before giving up and going back to idle.
@@ -74,6 +76,17 @@ COMMAND_WAIT_TIMEOUT = 15
 # "small" is more accurate but noticeably slower on CPU. If STT is
 # your bottleneck, this is the dial to turn.
 WHISPER_MODEL = "base"
+
+# "auto" uses an NVIDIA GPU via CUDA if one is available, else the CPU.
+# On a GPU even "small" transcribes in ~0.1-0.2s.
+WHISPER_DEVICE = "auto"
+
+# int8 is the fast choice on CPU; on a GPU "float16" is usually best.
+WHISPER_COMPUTE_TYPE = "int8"
+
+# CPU threads for Whisper. ctranslate2 defaults to 4; using all your
+# cores is a free speedup on most desktops.
+WHISPER_CPU_THREADS = os.cpu_count() or 4
 
 WHISPER_LANGUAGE = "it"
 
@@ -148,12 +161,14 @@ VISION_JPEG_QUALITY = 80
 # Text-to-speech
 # ==========================
 
-# Sample rate Piper streams raw PCM at. Medium-quality voices are
-# typically 22050 Hz - if you swap VOICE_MODEL, check the matching
-# .onnx.json ("sample_rate" field) and update this. A mismatch makes
-# speech sound sped up or slowed down, not garbled, so it's easy to
-# miss.
-PIPER_SAMPLE_RATE = 22050
+# The voice's sample rate is read from its .onnx.json automatically.
+
+# Short tone played after the wake word, instead of a spoken greeting.
+# It's pre-rendered in memory, so it plays instantly - a spoken
+# "Eccomi, dimmi." cost ~1s of synthesis + speech on every activation.
+BEEP_FREQUENCY = 880
+
+BEEP_DURATION = 0.12
 
 
 

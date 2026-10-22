@@ -2,7 +2,10 @@ from faster_whisper import WhisperModel
 
 from config import (
     WHISPER_MODEL,
-    WHISPER_LANGUAGE
+    WHISPER_LANGUAGE,
+    WHISPER_DEVICE,
+    WHISPER_COMPUTE_TYPE,
+    WHISPER_CPU_THREADS
 )
 
 from core.console import log
@@ -13,8 +16,9 @@ log("STT", "Loading...")
 
 model = WhisperModel(
     WHISPER_MODEL,
-    device="cpu",
-    compute_type="int8"
+    device=WHISPER_DEVICE,
+    compute_type=WHISPER_COMPUTE_TYPE,
+    cpu_threads=WHISPER_CPU_THREADS
 )
 
 

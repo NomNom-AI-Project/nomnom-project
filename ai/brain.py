@@ -28,26 +28,24 @@ def think_stream(
     # waiting for the whole answer to finish. This is the single
     # biggest improvement to *perceived* response time.
 
-    memory.add_user(
-        text
+    # The exchange is only written to memory once the reply has been
+    # fully generated. Previously the user message was stored first, so
+    # an Ollama error mid-stream left two user turns in a row in the
+    # history, which confuses the model on the next request.
+
+    content = (
+        f"{text}\n\n{extra_context}"
+        if extra_context
+        else text
     )
 
 
-    messages = memory.get()
-
-
-    if extra_context:
-
-        # Augment only the outgoing request for this call. What's
-        # stored in memory stays the clean user text - so history
-        # doesn't fill up with camera-analysis scaffolding.
-
-        messages = messages[:-1] + [
-            {
-                "role":"user",
-                "content":f"{text}\n\n{extra_context}"
-            }
-        ]
+    messages = memory.get() + [
+        {
+            "role":"user",
+            "content":content
+        }
+    ]
 
 
     answer = ""
@@ -79,7 +77,11 @@ def think_stream(
 
 
 
-    memory.add_ai(
+    # Only the clean user text is stored, so history doesn't fill up
+    # with camera-analysis scaffolding.
+
+    remember(
+        text,
         answer.strip()
     )
 
@@ -107,8 +109,8 @@ def remember(
     ai_text
 ):
 
-    # Used by the vision path, which answers from the vision model
-    # directly and so never goes through think_stream().
+    # Stores one finished exchange. Also used by the vision path,
+    # which answers from the vision model directly.
 
     memory.add_user(user_text)
 
